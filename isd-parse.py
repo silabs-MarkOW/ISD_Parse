@@ -38,7 +38,7 @@ class Help :
 def exit_help(prognam,error=None) :
     if None != error :
         print('Error: %s'%(error))
-    print('Usage: %s [ options ] <isd-log-file>:'%(prognam))
+    print('Usage: %s [ options ] <isd-log-file>'%(prognam))
     help = Help()
     help.add('--supress-pti','suppress rendering of unexceptional data')
     help.add('-h','show this help')
