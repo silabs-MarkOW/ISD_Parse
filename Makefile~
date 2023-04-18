@@ -1,0 +1,9 @@
+SCRIPTS = isd-parse
+BINDIR = ~/bin
+
+default :
+	stat ${addsuffix .py,${SCRIPTS}}
+
+install :
+	install -m755 -d ${BINDIR}
+	python3 install-backend.py -b ${BINDIR} ${SCRIPTS}
