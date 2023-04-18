@@ -8,7 +8,7 @@ captures, there will be multiple number eventX.log files.
 ## Example usage:
 <pre>
 sh$ isd-parse -h
-Usage: /home/bofh/bin/isd-parse [ options ] <isd-log-file>:
+Usage: /home/bofh/bin/isd-parse [ options ] &lt;isd-log-file&gt;
 Options:
      --supress-pti : suppress rendering of unexceptional data 
                 -h : show this help                           
