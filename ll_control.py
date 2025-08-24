@@ -22,18 +22,25 @@ class LL_TERMINATE_IND(LL_Control) :
 
 class LL_ENC_REQ(LL_Control) :
   def __init__(self, data) :
-    raise RuntimeError('%s not implemented'%(type(self).__name__))
-
-
+    self.Rand = int.from_bytes(data[:8],'little')
+    self.EDIV = int.from_bytes(data[8:10],'little')
+    self.SKD_C = int.from_bytes(data[10:18],'little')
+    self.IV_C = int.from_bytes(data[18:22],'little')
+  def __str__(self) :
+    return 'LL_ENC_REQ: Rand:0x%016x, EDIV:0x%04x, SKD_C:0x%016x, IV_C:0x%08x'%(self.Rand,self.EDIV,self.SKD_C,self.IV_C)
+  
 class LL_ENC_RSP(LL_Control) :
   def __init__(self, data) :
-    raise RuntimeError('%s not implemented'%(type(self).__name__))
-
+    self.SKD_P = int.from_bytes(data[:8],'little')
+    self.IV_P = int.from_bytes(data[8:12],'little')
+  def __str__(self) :
+    return 'LL_ENC_RSP: SKD_P:0x%016x, IV_P:0x%08x'%(self.SKD_P,self.IV_P)
 
 class LL_START_ENC_REQ(LL_Control) :
   def __init__(self, data) :
-    raise RuntimeError('%s not implemented'%(type(self).__name__))
-
+    pass
+  def __str__(self) :
+    return 'LL_START_ENC_REQ'  
 
 class LL_START_ENC_RSP(LL_Control) :
   def __init__(self, data) :

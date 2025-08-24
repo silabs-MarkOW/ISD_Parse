@@ -1,5 +1,6 @@
 import ll_control
 import attribute
+import scheduling
 
 class LL_Control :
     def __init__(self,data) :
@@ -7,7 +8,7 @@ class LL_Control :
         self.CtrlData = data[1:]
         cls = ll_control.LL_Control_PDUs.get(self.opcode)
         if None == cls :
-            raise RuntimeError
+            raise RuntimeError(scheduling.now, 'LL_Control.opcode: 0x%02x'%(self.opcode))
         self.content = cls(self.CtrlData)
     def __str__(self) :
         return self.content.__str__()

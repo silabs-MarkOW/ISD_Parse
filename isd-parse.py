@@ -5,6 +5,7 @@ import getopt
 import advertising
 import data
 import connection
+import scheduling
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--verbose',action='store_true')
@@ -52,26 +53,6 @@ def pti_error(msg) :
     if verbose_pti :
         print(msg)
 
-class Window :
-    def __init__(self,start,stop,owner) :
-        self.start = start
-        self.stop = stop
-        self.owner = owner
-        print('Window: %.4f - %.4f s'%(start,stop))
-    def contains(self,value) :
-        if value < self.start :
-            return False
-        if value > self.stop :
-            return False
-        return True
-    def below(self,value) :
-        return self.stop < value
-
-windows = []
-
-def schedule(start,stop,owner) :
-        windows.append(Window(start,stop,owner))
-    
 def callback(obj) :
     if type(obj) == advertising.CONNECT_IND :
         conn = connection.Connection(obj,timestamp,schedule)
@@ -90,19 +71,24 @@ for line in lines :
     metadata1 = tokens[0][1:].split()
     if 'Packet' != metadata1[3] :
         continue
+    print(line)
+    duration = 1e-6*int(metadata1[1])/100
     timestamp = 1e-6*int(metadata1[0])
     pti = bytes([int(x,16) for x in tokens[2].replace(']','').strip().split()])
     HWstart = pti[0]
     isTx = (HWstart & 0x4) == 0x4
     ConfigInfo = pti[-1]
     AppendedInfoLength = (ConfigInfo >> 3) & 7
+    RxTx = (ConfigInfo & 0x40) >> 6
+    StatusByte = pti[-2]
+    ErrorCode = StatusByte >> 4
+    ProtoCol = StatusByte & 0x0f
     OtaEnd = len(pti)-4-AppendedInfoLength
     HWend = pti[OtaEnd]
-    Rssi =  pti[OtaEnd+1]
-    if Rssi > 127 : Rssi-= 256
-    Rssi -= 50
-    Channel = pti[-3]
-    ota = pti[1:OtaEnd]
+    SyncWord = None
+    if ErrorCode :
+        continue
+        raise RuntimeError(timestamp)
     if HWend == 0xff :
         pti_error("partial packet, PTI overrun (%s)"%(pti))
         continue
@@ -115,23 +101,39 @@ for line in lines :
     elif HWend != 0xf9 and HWend != 0xfd :
         pti_error('%.6f: Unexpected HWEnd: 0x%02x %s'%(timestamp,HWend,pti))
         continue
+    elif HWend == 0xfd :
+        if 5 == AppendedInfoLength :
+            SyncWord = int.from_bytes(pti[-8:][:4],'little');
+        else :
+            raise RuntimeError(timestamp)
+    elif HWend == 0xf9 :
+            Rssi =  pti[OtaEnd+1]
+            if Rssi > 127 : Rssi-= 256
+            Rssi -= 50
+            if 6 == AppendedInfoLength :
+                SyncWord = int.from_bytes(pti[-8:][:4],'little');
+            elif 5 == AppendedInfoLength :
+                SyncWord = int.from_bytes(pti[-7:][:4],'little');
+            else :
+                raise RuntimeError(timestamp)
+    else :
+        raise RuntimeError('HWEnd: 0x%02x'%(HWEnd))
+    if None == SyncWord :
+        raise RuntimeError(timestamp)
+    Channel = pti[-3]
+    ota = pti[1:OtaEnd]
     if args.check_crc and not verify_crc(ota) :
         print("%.6f: %s CRC FAILURE"%(timestamp,ota))
     if pti[0:4] == [0xF8, 0x07, 0x07, 0x46] :
         print("%d %d dBm (%s)"%(Channel,Rssi,pti[OtaEnd+1]))
 
-    clean = []
     obj = None
-    for window in windows :
-        if window.contains(timestamp) :
-            if connection.Connection == type(window.owner) :
-                print(timestamp)
-                obj = data.PDU(ota[:-3])
-                window.owner.process(obj,timestamp)
-            else :
-                raise RuntimeError
-        elif not window.below(timestamp) :
-            clean.append(window)
+    scheduling.update(timestamp, duration)
+    for window in scheduling.expect(500e-6) :
+        obj = window.process(ota[:-3],Channel,SyncWord,isTx,True)
+        print("expected",scheduling.now,obj.content)
+    if None == obj and SyncWord == 0x8e89bed6 :
+        obj = advertising.PDU(ota[:-3],Channel,SyncWord)
+        print(scheduling.now,"0x%08x"%(SyncWord),obj.content)
     if None == obj :
-        obj = advertising.PDU(ota[:-3],Channel,callback)
-    
+        raise RuntimeError("%f: channel: %d, SyncWord: 0x%08x"%(scheduling.now, Channel, SyncWord))
