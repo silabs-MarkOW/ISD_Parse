@@ -71,7 +71,7 @@ for line in lines :
     metadata1 = tokens[0][1:].split()
     if 'Packet' != metadata1[3] :
         continue
-    print(line)
+    #print(line)
     duration = 1e-6*int(metadata1[1])/100
     timestamp = 1e-6*int(metadata1[0])
     pti = bytes([int(x,16) for x in tokens[2].replace(']','').strip().split()])
@@ -103,9 +103,11 @@ for line in lines :
         continue
     elif HWend == 0xfd :
         if 5 == AppendedInfoLength :
-            SyncWord = int.from_bytes(pti[-8:][:4],'little');
+            SyncWord = int.from_bytes(pti[-8:][:4],'little')
+        if 4 == AppendedInfoLength :
+            SyncWord = int.from_bytes(pti[-7:][:4],'little')
         else :
-            raise RuntimeError(timestamp)
+            raise RuntimeError(timestamp,AppendedInfoLength)
     elif HWend == 0xf9 :
             Rssi =  pti[OtaEnd+1]
             if Rssi > 127 : Rssi-= 256
@@ -132,7 +134,7 @@ for line in lines :
     for window in scheduling.expect(500e-6) :
         obj = window.process(ota[:-3],Channel,SyncWord,isTx,True)
         print("expected",scheduling.now,obj.content)
-    if None == obj and SyncWord == 0x8e89bed6 :
+    if None == obj and SyncWord == 0x8e89bed6 or SyncWord == 0x4315321b :
         obj = advertising.PDU(ota[:-3],Channel,SyncWord)
         print(scheduling.now,"0x%08x"%(SyncWord),obj.content)
     if None == obj :

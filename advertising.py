@@ -83,47 +83,86 @@ class AuxPtr :
         self.AuxPhy = (data[2] >> 5) & 7
         if self.AuxPhy > 2 :
             raise RuntimeError(self.AuxPhy)
+
+class SyncInfo :
+    def __init__(self,data) :
+        self.OffsetBase = data[0] | ((data[1] & 0x1f) << 8)
+        if data[1] & 0x20 :
+            self.OffsetUnits = 300e-6
+        else :
+            self.OffsetUnits = 30e-6
+        self.OffsetAdjust = (data[1] >> 7) & 1
+        Interval = int.from_bytes(data[2:4],'little')
+        self.ChM = int.from_bytes(data[4:9]) & 0x1fffffffff
+        self.SCA = data[8] >> 5
+        self.AA = int.from_bytes(data[9:13],'little')
+        self.CRCInit = int.from_bytes(data[13:16],'little')
+        self.PeriodicEventCounter = int.from_bytes(data[16:18],'little')
+    def syncPacketWindowOffset(self) :
+        s = self.OffsetBase * self.OffsetUnits
+        if self.OffsetAdjust :
+            s += 2.4576
+        return s
+    def __str__(self) :
+        return 'Offset: {:f} ms, ChM: {:037b}, AA: 0x{:08x}, Counter: {:d}'.format(1e3*self.syncPacketWindowOffset(),self.ChM,self.AA,self.PeriodicEventCounter) 
         
+def P(x) :
+    return ' '.join(['%02x'%(x) for x in list(x)])
+
+class AdvDataInfo :
+    def __init__(self, data) :
+        word = int.from_bytes(data,'little')
+        self.DID = word & 0x0fff
+        self.SID = word >> 12
+    def __str__(self) :
+        return 'Advertising Data ID: %d, Advertising Set ID: %d'%(self.DID,self.SID)
+    
 class ExtendedHeader :
     def __init__(self,data) :
+        #print("class ExtendedHeader.__init__(",list(data))
         flags = data[0]
         data = data[1:]
+        #print('flags: {:08b}'.format(flags))
         if flags & 1 :
-            self.AdvA = data[:6]
+            self.AdvA = int.from_bytes(data[:6],'little')
             data = data[6:]
         else :
             self.AdvA = None
         if flags & 2 :
-            self.TargetA = data[:6]
+            self.TargetA = int.from_bytes(data[:6],'little')
             data = data[6:]
         else :
             self.TargetA = None
         if flags & 4 :
             self.CTEInfo = data[0]
+            #print('CTEInfo:',CTEInfo)
             data = data[1:]
         else :
             self.CTEInfo = None
         if flags & 8 :
-            self.AdvDataInfo = data[:2]
+            self.AdvDataInfo = AdvDataInfo(data[:2])
+            #print('AdvDataInfo:',self.AdvDataInfo)
             data = data[2:]
         else :
             self.AdvDataInfo = None
         if flags & 0x10 :
             self.AuxPtr = AuxPtr(data[:3])
+            #print('AuxPtr:',self.AuxPtr)
             data = data[3:]
         else :
             self.AuxPtr =  None
         if flags & 0x20 :
-            self.SyncInfo = data[:18]
+            self.SyncInfo = SyncInfo(data[:18])
+            #print('SyncInfo:',self.SyncInfo)
             data = data[18:]
         else :
             self.SyncInfo = None
         if flags & 0x40 :
-            self.TxPower = data[1]
+            self.TxPower = data[0]
+            data = data[1:]
         else :
             self.TxPower = None
-        if 0 != len(data) :
-            raise RuntimeError(data)
+        self.ACAD = data
         
 class CommonExtendedAdvertisingPayload :
     def __init__(self,data) :
@@ -148,7 +187,41 @@ class ADV_EXT_IND :
         return obj
     def on_missed(self) :
         pass
-    
+
+class AUX_ADV_IND :
+    def __init__(self,data) :
+        self.Payload = CommonExtendedAdvertisingPayload(data)
+        SyncInfo = self.Payload.ExtendedHeader.SyncInfo
+        if None != SyncInfo :
+            offset = SyncInfo.syncPacketWindowOffset()
+            scheduling.schedule(offset, SyncInfo.OffsetUnits, self)
+    def process(self,data,channel,SyncWord,window) :
+        print('AUX_ADV_IND.process(',data,')','SyncWord:0x%08x'%(SyncWord))
+        #try :
+        obj = PDU(data,channel,SyncWord)
+        #except :
+        #    return None
+        return obj
+    def on_missed(self) :
+        pass
+
+class AUX_SYNC_IND :
+    def __init__(self,data) :
+        self.Payload = CommonExtendedAdvertisingPayload(data)
+        AuxPtr = self.Payload.ExtendedHeader.AuxPtr
+        if None != AuxPtr :
+            offset = AuxPtr.AuxOffset * AuxPtr.OffsetUnits
+            scheduling.schedule(offset, AuxPtr.OffsetUnits, self)
+    def process(self,data,channel,SyncWord,window) :
+        print('AUX_SYNC_IND.process(',data,')','SyncWord:0x%08x'%(SyncWord))
+        #try :
+        obj = PDU(data,channel,SyncWord)
+        #except :
+        #    return None
+        return obj
+    def on_missed(self) :
+        pass
+
 class AUX_CONNECT_RSP :
     def __init__(self,data) :
         self.Payload = CommonExtendedAdvertisingPayload(data)
@@ -161,32 +234,39 @@ class AUX_CONNECT_RSP :
     
 class PDU :
     def __init__(self,data,channel,SyncWord) :
-        if SyncWord != 0x8e89bed6 :
-            raise RuntimeError(scheduling.now)
         self.header = int.from_bytes(data[:2],'little')
         self.payload = data[2:]
         pdu_type = self.header & 0xf
         self.length = self.header >> 8
-        if 0 == pdu_type :
-            self.content = ADV_IND(self.payload)
-        elif 1 == pdu_type :
-            self.content = ADV_DIRECT_IND(self.payload)
-        elif 2 == pdu_type :
-            self.content = ADV_NONCONN_IND(self.payload)
-        elif 3 == pdu_type :
-            self.content = SCAN_REQ(self.payload)
-        elif 3 == pdu_type :
-            self.content = AUX_SCAN_REQ(self.payload)
-        elif 4 == pdu_type :
-            self.content = SCAN_RSP(self.payload)
-        elif 5 == pdu_type :
-            if is_primary_channel(channel) :
-                self.content = CONNECT_IND(self.payload)
-            else :
-                self.content = AUX_CONNECT_REQ(self.payload)
-        elif 7 == pdu_type :
-            self.content = ADV_EXT_IND(self.payload)
-        elif 8 == pdu_type :
-            self.content = AUX_CONNECT_RSP(self.payload)
+        self.content = None
+        if SyncWord == 0x8e89bed6 :
+            if 0 == pdu_type :
+                self.content = ADV_IND(self.payload)
+            elif 1 == pdu_type :
+                self.content = ADV_DIRECT_IND(self.payload)
+            elif 2 == pdu_type :
+                self.content = ADV_NONCONN_IND(self.payload)
+            elif 3 == pdu_type :
+                if is_primary_channel(channel) :
+                    self.content = SCAN_REQ(self.payload)
+                else :
+                    self.content = AUX_SCAN_REQ(self.payload)
+            elif 4 == pdu_type :
+                self.content = SCAN_RSP(self.payload)
+            elif 5 == pdu_type :
+                if is_primary_channel(channel) :
+                    self.content = CONNECT_IND(self.payload)
+                else :
+                    self.content = AUX_CONNECT_REQ(self.payload)
+            elif 7 == pdu_type :
+                if is_primary_channel(channel) :
+                    self.content = ADV_EXT_IND(self.payload)
+                else :
+                    self.content = AUX_ADV_IND(self.payload)
+            elif 8 == pdu_type :
+                self.content = AUX_CONNECT_RSP(self.payload)
         else :
+            if 7 == pdu_type :
+                self.content = AUX_SYNC_IND(self.payload)
+        if None == self.content :
             raise RuntimeError('%f: channel:%d, type:%d'%(scheduling.now, channel,pdu_type))
