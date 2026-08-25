@@ -104,7 +104,7 @@ for line in lines :
     elif HWend == 0xfd :
         if 5 == AppendedInfoLength :
             SyncWord = int.from_bytes(pti[-8:][:4],'little')
-        if 4 == AppendedInfoLength :
+        elif 4 == AppendedInfoLength :
             SyncWord = int.from_bytes(pti[-7:][:4],'little')
         else :
             raise RuntimeError(timestamp,AppendedInfoLength)
@@ -128,7 +128,8 @@ for line in lines :
         print("%.6f: %s CRC FAILURE"%(timestamp,ota))
     if pti[0:4] == [0xF8, 0x07, 0x07, 0x46] :
         print("%d %d dBm (%s)"%(Channel,Rssi,pti[OtaEnd+1]))
-
+        
+    print("Packet at %.6f"%(timestamp))
     obj = None
     scheduling.update(timestamp, duration)
     for window in scheduling.expect(500e-6) :
